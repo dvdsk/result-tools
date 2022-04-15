@@ -1,17 +1,19 @@
 pub trait ResultToolsA {
     type Error;
-    fn accept_fn<P: FnMut(&Self::Error) -> bool>(self, predicate: P) -> Self;
+    fn ok_if<P: FnMut(&Self::Error) -> bool>(self, predicate: P) -> Self;
 }
 
 pub trait ResultToolsB {
     type Error;
-    fn accept(self, accaptable: Self::Error) -> Self;
+    fn ok_if_is<U>(self, accaptable: U) -> Self
+    where
+        Self::Error: PartialEq<U>;
 }
 
 pub trait ResultToolsC {
     type Error;
     type Value;
-    fn accept_transform_fn(
+    fn ok_none_if(
         self,
         f: impl FnOnce(&Self::Error) -> bool,
     ) -> Result<Option<Self::Value>, Self::Error>;
@@ -20,12 +22,14 @@ pub trait ResultToolsC {
 pub trait ResultToolsD {
     type Error;
     type Value;
-    fn accept_transform(self, accaptable: Self::Error) -> Result<Option<Self::Value>, Self::Error>;
+    fn ok_none_if_is<U>(self, accaptable: U) -> Result<Option<Self::Value>, Self::Error>
+    where
+        Self::Error: PartialEq<U>;
 }
 
 impl<E> ResultToolsA for Result<(), E> {
     type Error = E;
-    fn accept_fn<P: FnMut(&Self::Error) -> bool>(self, mut predicate: P) -> Self {
+    fn ok_if<P: FnMut(&Self::Error) -> bool>(self, mut predicate: P) -> Self {
         match self {
             Ok(_) => Ok(()),
             Err(e) if predicate(&e) => Ok(()),
@@ -34,9 +38,12 @@ impl<E> ResultToolsA for Result<(), E> {
     }
 }
 
-impl<E: PartialEq> ResultToolsB for Result<(), E> {
+impl<E> ResultToolsB for Result<(), E> {
     type Error = E;
-    fn accept(self, accaptable: E) -> Self {
+    fn ok_if_is<U>(self, accaptable: U) -> Self
+    where
+        Self::Error: PartialEq<U>,
+    {
         match self {
             Ok(_) => Ok(()),
             Err(e) if e == accaptable => Ok(()),
@@ -48,7 +55,7 @@ impl<E: PartialEq> ResultToolsB for Result<(), E> {
 impl<T, E> ResultToolsC for Result<T, E> {
     type Error = E;
     type Value = T;
-    fn accept_transform_fn(
+    fn ok_none_if(
         self,
         f: impl FnOnce(&Self::Error) -> bool,
     ) -> Result<Option<Self::Value>, Self::Error> {
@@ -63,7 +70,10 @@ impl<T, E> ResultToolsC for Result<T, E> {
 impl<T, E: PartialEq> ResultToolsD for Result<T, E> {
     type Error = E;
     type Value = T;
-    fn accept_transform(self, accaptable: Self::Error) -> Result<Option<Self::Value>, Self::Error> {
+    fn ok_none_if_is<U>(self, accaptable: U) -> Result<Option<Self::Value>, Self::Error>
+    where
+        Self::Error: PartialEq<U>,
+    {
         match self {
             Ok(v) => Ok(Some(v)),
             Err(e) if e == accaptable => Ok(None),
@@ -90,14 +100,14 @@ mod tests {
         fn predicate_returns_true() {
             let result: Result<(), io::Error> = Err(io::Error::new(ErrorKind::AlreadyExists, ""));
             result
-                .accept_fn(|e| e.kind() == ErrorKind::AlreadyExists)
+                .ok_if(|e| e.kind() == ErrorKind::AlreadyExists)
                 .unwrap();
         }
         #[test]
         fn predicate_returns_false() {
             let result: Result<(), io::Error> = Err(io::Error::new(ErrorKind::NotFound, ""));
             result
-                .accept_fn(|e| e.kind() == ErrorKind::AlreadyExists)
+                .ok_if(|e| e.kind() == ErrorKind::AlreadyExists)
                 .unwrap_err();
         }
     }
@@ -108,13 +118,13 @@ mod tests {
         #[test]
         fn matching() {
             let result: Result<(), _> = Err(Error::A);
-            result.accept(Error::A).unwrap();
+            result.ok_if_is(Error::A).unwrap();
         }
 
         #[test]
         fn not_matching() {
             let result: Result<(), _> = Err(Error::B);
-            result.accept(Error::A).unwrap_err();
+            result.ok_if_is(Error::A).unwrap_err();
         }
     }
 
@@ -125,7 +135,7 @@ mod tests {
         fn predicate_returns_true() {
             let result: Result<&str, io::Error> = Err(io::Error::new(ErrorKind::AlreadyExists, ""));
             let result = result
-                .accept_transform_fn(|e| e.kind() == ErrorKind::AlreadyExists)
+                .ok_none_if(|e| e.kind() == ErrorKind::AlreadyExists)
                 .unwrap();
             assert_eq!(result, None);
         }
@@ -134,7 +144,7 @@ mod tests {
         fn predicate_returns_false() {
             let result: Result<&str, io::Error> = Err(io::Error::new(ErrorKind::NotFound, ""));
             result
-                .accept_transform_fn(|e| e.kind() == ErrorKind::AlreadyExists)
+                .ok_none_if(|e| e.kind() == ErrorKind::AlreadyExists)
                 .unwrap_err();
         }
     }
@@ -145,14 +155,14 @@ mod tests {
         #[test]
         fn matching() {
             let result: Result<(), _> = Err(Error::A);
-            let result = result.accept_transform(Error::A).unwrap();
+            let result = result.ok_none_if_is(Error::A).unwrap();
             assert_eq!(result, None);
         }
 
         #[test]
         fn not_matching() {
             let result: Result<(), _> = Err(Error::B);
-            result.accept_transform(Error::A).unwrap_err();
+            result.ok_none_if_is(Error::A).unwrap_err();
         }
     }
 }
